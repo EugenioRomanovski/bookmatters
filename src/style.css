@@ -1829,6 +1829,20 @@ footer > span:last-child {
   }
 }
 
+/* iOS Safari zooms focused controls below 16px. Keep this floor even when
+   component rules use smaller type, including iPad and installed PWAs. */
+@media (max-width: 850px), (any-pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+    min-width: 0;
+  }
+  .form-row > label {
+    min-width: 0;
+  }
+}
+
 /* Keep the installed app clear of iPhone notches and home indicators. */
 @media (display-mode: standalone) {
   footer {
