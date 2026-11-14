@@ -44,9 +44,11 @@ npm run build
 
 Vercel: Vite, build `npm run build`, output `dist`. `vercel.json` содержит SPA rewrite и базовые HTTP-заголовки. Целевая команда `brainsome`, домен `bookmatters.brainsome.app`.
 
-Создание Vercel-проекта отклонено подключением (403: нет разрешения). Требуется подтверждение доступа команды через Vercel. Создание репозитория GitHub через доступную интеграцию также отклонено (`Resource not accessible by integration`). Пока проект сохранён локально с git-историей.
+Исходники: https://github.com/EugenioRomanovski/bookmatters.
 
-После восстановления доступа: загрузить исходники в отдельный репозиторий, создать/связать Vercel-проект, развернуть production, привязать домен, проверить HTTPS, каталог и вход по коду. DNS-зона `brainsome.app` уже управляется Vercel и имеет wildcard; существующие почтовые и API-записи менять не нужно.
+Подключение Vercel возвращает 403 на создание проекта, в том числе после подтверждения доступа команды. CLI с отдельной авторизацией в окружении отсутствует. Для первичного создания требуется импорт репозитория владельцем команды.
+
+Настройки импорта Vercel: команда brainsome, имя bookmatters, репозиторий EugenioRomanovski/bookmatters, ветка main, framework Vite, build npm run build, output dist. После создания: развернуть production, привязать домен, проверить HTTPS, каталог и вход по коду. DNS-зона `brainsome.app` уже управляется Vercel и имеет wildcard; существующие почтовые и API-записи менять не нужно.
 
 ## Текущие границы первой версии
 
