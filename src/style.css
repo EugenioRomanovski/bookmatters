@@ -1828,3 +1828,29 @@ footer > span:last-child {
     letter-spacing: -1.5px;
   }
 }
+
+/* Keep the installed app clear of iPhone notches and home indicators. */
+@media (display-mode: standalone) {
+  footer {
+    padding-bottom: max(31px, env(safe-area-inset-bottom));
+  }
+  .toast {
+    bottom: max(25px, env(safe-area-inset-bottom));
+  }
+  @media (max-width: 600px) {
+    header {
+      height: calc(69px + env(safe-area-inset-top));
+      padding-top: env(safe-area-inset-top);
+      padding-left: max(19px, env(safe-area-inset-left));
+      padding-right: max(19px, env(safe-area-inset-right));
+    }
+    .sidebar.open {
+      top: calc(69px + env(safe-area-inset-top));
+      padding-bottom: max(20px, env(safe-area-inset-bottom));
+    }
+    main {
+      padding-left: max(20px, env(safe-area-inset-left));
+      padding-right: max(20px, env(safe-area-inset-right));
+    }
+  }
+}
