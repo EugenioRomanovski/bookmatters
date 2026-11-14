@@ -70,3 +70,6 @@ begin
 end $$;
 revoke all on function public.bm_create_reading_club(text,text,text,text,integer,date,integer,text,text,time) from public,anon;
 grant execute on function public.bm_create_reading_club(text,text,text,text,integer,date,integer,text,text,time) to authenticated;
+
+-- Prevent default Supabase grants from allowing anonymous private-table requests.
+revoke all on public.bm_posts,public.bm_progress from anon;
