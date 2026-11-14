@@ -46,9 +46,11 @@ Vercel: Vite, build `npm run build`, output `dist`. `vercel.json` содержи
 
 Исходники: https://github.com/EugenioRomanovski/bookmatters.
 
-Подключение Vercel возвращает 403 на создание проекта, в том числе после подтверждения доступа команды. CLI с отдельной авторизацией в окружении отсутствует. Для первичного создания требуется импорт репозитория владельцем команды.
+Приложение опубликовано: https://bookmatters.vercel.app. GitHub подтверждает успешное production-развёртывание коммита `788e0a3`. HTTP-проверки страницы, JS и CSS возвращают 200; запрос каталога Supabase с Origin опубликованного сайта проходит и получает корректный CORS.
 
-Настройки импорта Vercel: команда brainsome, имя bookmatters, репозиторий EugenioRomanovski/bookmatters, ветка main, framework Vite, build npm run build, output dist. После создания: развернуть production, привязать домен, проверить HTTPS, каталог и вход по коду. DNS-зона `brainsome.app` уже управляется Vercel и имеет wildcard; существующие почтовые и API-записи менять не нужно.
+Подключение Vercel не показывает существующий проект в списке и возвращает Project not found при запросах проекта и добавлении домена. Поэтому домен ещё не привязан. Добавить `bookmatters.brainsome.app` можно через https://vercel.com/brainsome/bookmatters/settings/domains. DNS-зона brainsome.app уже управляется Vercel и имеет wildcard. Требуемые DNS-изменения, если Vercel их запросит, следует брать из настроек домена; почтовые и API-записи не менять.
+
+Браузерная проверка и фактическая доставка OTP остаются непроверенными. Runtime logs через подключение Vercel недоступны.
 
 ## Текущие границы первой версии
 
