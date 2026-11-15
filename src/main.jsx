@@ -244,6 +244,10 @@ function App() {
   }, [user?.id]);
   useEffect(() => {
     const id = new URLSearchParams(location.search).get("club");
+    if (id === "demo") {
+      openClub(demo);
+      return;
+    }
     if (id && clubs.length) {
       const c = clubs.find((c) => c.id === id);
       if (c) openClub(c);
@@ -299,12 +303,12 @@ function App() {
     setStage(0);
     setProgress({ page: 0, note: "" });
     setPosts([]);
+    history.replaceState(null, "", "?club=" + c.id);
     if (c.id === "demo") {
       setStages(demoStages);
       return;
     }
     setStages([]);
-    history.replaceState(null, "", "?club=" + c.id);
     await run(async () => {
       const r = await db
         .from("bm_stages")
@@ -318,6 +322,17 @@ function App() {
       );
       setStage(Math.max(0, idx));
     });
+  }
+  function openClubLink(event, selectedClub) {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) return;
+    event.preventDefault();
+    openClub(selectedClub);
   }
   function auth() {
     setModal("auth");
@@ -735,7 +750,13 @@ function App() {
               ) : (
                 <div className="club-grid">
                   {filtered.map((c, i) => (
-                    <article className="club-card" key={c.id}>
+                    <a
+                      className="club-card"
+                      key={c.id}
+                      href={"/?club=" + c.id}
+                      aria-label={"Открыть клуб «" + c.name + "» — " + c.book}
+                      onClick={(event) => openClubLink(event, c)}
+                    >
                       <div className={"card-cover color" + (i % 3)}>
                         <Cover
                           book={c.book}
@@ -769,17 +790,19 @@ function App() {
                           </span>
                           <span>{c.weeks} нед.</span>
                         </div>
-                        <button
-                          className="text-btn"
-                          onClick={() => openClub(c)}
-                        >
+                        <span className="text-btn">
                           Заглянуть в клуб <ArrowUpRight size={17} />
-                        </button>
+                        </span>
                       </div>
-                    </article>
+                    </a>
                   ))}
                   {view === "discover" && !query && (
-                    <article className="club-card demo-card">
+                    <a
+                      className="club-card demo-card"
+                      href="/?club=demo"
+                      aria-label="Посмотреть пример клуба «Между строк»"
+                      onClick={(event) => openClubLink(event, demo)}
+                    >
                       <div className="card-cover">
                         <Cover small />
                         <span className="badge">Пример клуба</span>
@@ -794,14 +817,11 @@ function App() {
                           </span>
                           <span>224 стр.</span>
                         </div>
-                        <button
-                          className="text-btn"
-                          onClick={() => openClub(demo)}
-                        >
+                        <span className="text-btn">
                           Посмотреть пример <ArrowUpRight size={17} />
-                        </button>
+                        </span>
                       </div>
-                    </article>
+                    </a>
                   )}
                   {!query && (
                     <button
@@ -1581,21 +1601,17 @@ function App() {
                         </button>
                       </div>
                       <label>
-                        Как вас представить клубу?
-                        <input
-                          required
-                          maxLength="80"
-                          value={nickname}
-                          onChange={(e) => setNickname(e.target.value)}
-                          placeholder="Ваше имя или псевдоним"
-                          autoFocus
-                        />
-                      </label>
-                      <label>
                         Email
                         <input
                           required
                           type="email"
+                          name="email"
+                          inputMode="email"
+                          autoComplete="email"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          autoFocus
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           placeholder="you@example.com"
@@ -1613,6 +1629,8 @@ function App() {
                         <input
                           autoFocus
                           required
+                          type="text"
+                          name="one-time-code"
                           inputMode="numeric"
                           autoComplete="one-time-code"
                           minLength="6"
@@ -1646,8 +1664,8 @@ function App() {
                   )}
                 </form>
                 <small className="fine">
-                  В клубах отображается выбранное имя. Email другим участникам
-                  не показывается.
+                  Пароль не нужен. Имя для клуба можно задать в профиле после
+                  входа. Email другим участникам не показывается.
                 </small>
               </>
             ) : modal === "invite" ? (

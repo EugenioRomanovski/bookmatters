@@ -3010,3 +3010,19 @@ footer > span:last-child {
     transition: none;
   }
 }
+
+/* One native link covers each card, with no nested interactive elements. */
+a.club-card {
+  cursor: pointer;
+  display: block;
+}
+a.club-card:focus-visible {
+  outline: 3px solid #839b70;
+  outline-offset: 4px;
+}
+@media (hover: hover) and (pointer: fine) {
+  a.club-card:hover {
+    border-color: #a8b995;
+    box-shadow: 0 7px 25px #30482b16;
+  }
+}
