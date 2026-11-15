@@ -21,8 +21,12 @@ import {
   Menu,
   Send,
   Trash2,
+  UserCircle,
+  Settings2,
+  Globe2,
 } from "lucide-react";
 import "./style.css";
+import { useCommunity, Community, InviteFriends } from "./community.jsx";
 const db = createClient(
   "https://api.brainsome.app",
   "sb_publishable_gD0M11LHLg4PJWxA8rKatQ_zn69qbw_",
@@ -88,6 +92,15 @@ function Cover({
     </div>
   );
 }
+const chapterMode = (c) => c?.reading_mode === "chapters";
+const totalUnits = (c) => (chapterMode(c) ? c.chapters : c.pages);
+const unitShort = (c) => (chapterMode(c) ? "гл." : "стр.");
+const stageRange = (s, c) =>
+  !s
+    ? ""
+    : chapterMode(c)
+      ? `Главы ${s.chapter_from}–${s.chapter_to}`
+      : `Страницы ${s.page_from}–${s.page_to}`;
 function App() {
   const [user, setUser] = useState(null),
     [clubs, setClubs] = useState([]),
@@ -113,6 +126,20 @@ function App() {
     [nickname, setNickname] = useState(localStorage.getItem("bm-name") || ""),
     [body, setBody] = useState(""),
     [kind, setKind] = useState("thought");
+  const community = useCommunity(db, user);
+  const [readingMode, setReadingMode] = useState("chapters");
+  const [visibility, setVisibility] = useState("open");
+  const [unitCount, setUnitCount] = useState(12);
+  const [settingsVisibility, setSettingsVisibility] = useState("open");
+  const incomingCount =
+    community.incoming.length +
+    community.invites.filter((i) => i.recipient_id === user?.id).length;
+  useEffect(() => {
+    if (community.profile?.display_name) {
+      setNickname(community.profile.display_name);
+      localStorage.setItem("bm-name", community.profile.display_name);
+    }
+  }, [community.profile?.display_name]);
   const mine =
       club &&
       members.some((m) => m.club_id === club.id && m.user_id === user?.id),
@@ -120,7 +147,12 @@ function App() {
     active = stages[stage],
     locked = active && new Date(active.opens_at) > new Date();
   const name = nickname.trim() || "Читатель";
+  const isOwner = Boolean(user && club && club.owner_id === user.id);
+  const canInvite = mine && (club?.visibility !== "closed" || isOwner);
+  const progressKey = chapterMode(club) ? "chapter" : "page";
   const activeId = useRef(null);
+  const viewerId = useRef(user?.id);
+  viewerId.current = user?.id;
   activeId.current = active?.id;
   useEffect(() => {
     if (!modal) return;
@@ -131,7 +163,7 @@ function App() {
       if (e.key === "Tab") {
         const nodes = [
           ...document.querySelectorAll(
-            "[role=dialog] button,[role=dialog] input,[role=dialog] textarea",
+            "[role=dialog] button,[role=dialog] input,[role=dialog] textarea,[role=dialog] select",
           ),
         ].filter((n) => !n.disabled);
         const first = nodes[0],
@@ -172,6 +204,7 @@ function App() {
     setTimeout(() => setNotice(""), 4500);
   }
   async function refresh() {
+    const identity = viewerId.current;
     setLoading(true);
     try {
       const [c, m] = await Promise.all([
@@ -182,6 +215,7 @@ function App() {
         db.from("bm_members").select("*"),
       ]);
       if (c.error || m.error) throw c.error || m.error;
+      if (identity !== viewerId.current) return;
       setClubs(c.data);
       setMembers(m.data);
     } catch (e) {
@@ -197,16 +231,24 @@ function App() {
     const { data } = db.auth.onAuthStateChange((_, s) =>
       setUser(s?.user || null),
     );
-    refresh();
     return () => data.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    setClubs([]);
+    setMembers([]);
+    if (!user) {
+      setClub(null);
+      setView("discover");
+    }
+    refresh();
+  }, [user?.id]);
   useEffect(() => {
     const id = new URLSearchParams(location.search).get("club");
     if (id && clubs.length) {
       const c = clubs.find((c) => c.id === id);
       if (c) openClub(c);
     }
-  }, [clubs.length]);
+  }, [clubs.map((c) => c.id).join(",")]);
   useEffect(() => {
     if (!user) {
       setPosts([]);
@@ -288,10 +330,20 @@ function App() {
       return;
     }
     await run(async () => {
-      const r = await db
-        .from("bm_members")
-        .insert({ club_id: club.id, user_id: user.id, display_name: name });
+      const invitation = community.invites.find(
+        (i) => i.club_id === club.id && i.recipient_id === user.id,
+      );
+      const r = invitation
+        ? await db.rpc("bm_respond_club_invite", {
+            p_invitation: invitation.id,
+            p_accept: true,
+            p_display_name: name,
+          })
+        : await db
+            .from("bm_members")
+            .insert({ club_id: club.id, user_id: user.id, display_name: name });
       if (r.error) throw r.error;
+      await community.load();
       await refresh();
       toast("Вы в клубе. Приятного чтения!");
     });
@@ -299,15 +351,14 @@ function App() {
   async function saveProgress(e) {
     e.preventDefault();
     await run(async () => {
-      const r = await db
-        .from("bm_progress")
-        .upsert({
-          club_id: club.id,
-          user_id: user.id,
-          page: Number(progress.page),
-          note: progress.note,
-          updated_at: new Date().toISOString(),
-        });
+      const r = await db.from("bm_progress").upsert({
+        club_id: club.id,
+        user_id: user.id,
+        page: chapterMode(club) ? 0 : Number(progress.page || 0),
+        chapter: chapterMode(club) ? Number(progress.chapter || 0) : 0,
+        note: progress.note,
+        updated_at: new Date().toISOString(),
+      });
       if (r.error) throw r.error;
       toast("Сохранено. У каждого свой темп.");
     });
@@ -316,15 +367,13 @@ function App() {
     e.preventDefault();
     if (!body.trim()) return;
     await run(async () => {
-      const r = await db
-        .from("bm_posts")
-        .insert({
-          stage_id: active.id,
-          user_id: user.id,
-          display_name: name,
-          body: body.trim(),
-          kind,
-        });
+      const r = await db.from("bm_posts").insert({
+        stage_id: active.id,
+        user_id: user.id,
+        display_name: name,
+        body: body.trim(),
+        kind,
+      });
       if (r.error) throw r.error;
       setBody("");
       await loadPosts(active);
@@ -361,13 +410,21 @@ function App() {
   async function create(e) {
     e.preventDefault();
     const f = new FormData(e.target);
+    if (Number(f.get("weeks")) > Number(f.get("units"))) {
+      setError(
+        "Недель не может быть больше, чем глав или страниц. Уменьшите число недель.",
+      );
+      return;
+    }
     await run(async () => {
-      const r = await db.rpc("bm_create_reading_club", {
+      const r = await db.rpc("bm_create_club_v2", {
         p_name: f.get("name").trim(),
         p_description: f.get("description").trim(),
         p_book: f.get("book").trim(),
         p_author: f.get("author").trim(),
-        p_pages: Number(f.get("pages")),
+        p_units: Number(f.get("units")),
+        p_mode: readingMode,
+        p_visibility: visibility,
         p_start: f.get("start"),
         p_weeks: Number(f.get("weeks")),
         p_meeting: f.get("meeting").trim(),
@@ -380,11 +437,52 @@ function App() {
       const c = await db.from("bm_clubs").select("*").eq("id", r.data).single();
       if (c.error) throw c.error;
       await openClub(c.data);
-      toast("Клуб создан. Пригласите друзей ссылкой!");
+      toast("Клуб создан. Пригласите друзей читать вместе!");
     });
   }
+  async function respondInvite(invitation, accept) {
+    const result = await community.respond(invitation.id, accept, name);
+    if (!result.ok) return;
+    await refresh();
+    if (accept) {
+      const c = await db
+        .from("bm_clubs")
+        .select("*")
+        .eq("id", result.value)
+        .single();
+      if (c.error) {
+        setError(c.error.message);
+        return;
+      }
+      await openClub(c.data);
+      toast("Вы в клубе. Приятного чтения!");
+    } else toast("Приглашение отклонено");
+  }
+  async function saveClubSettings(e) {
+    e.preventDefault();
+    await run(async () => {
+      const r = await db
+        .from("bm_clubs")
+        .update({ visibility: settingsVisibility })
+        .eq("id", club.id)
+        .select()
+        .single();
+      if (r.error) throw r.error;
+      setClub(r.data);
+      await refresh();
+      setModal(null);
+      toast("Доступ к клубу обновлён");
+    });
+  }
+  useEffect(() => {
+    if (user) refresh();
+  }, [community.invites.map((i) => i.id).join(",")]);
+  useEffect(() => {
+    if (user && ["friends", "account"].includes(view)) community.load();
+  }, [view]);
   const filtered = clubs.filter(
     (c) =>
+      (view !== "discover" || c.visibility !== "closed") &&
       (view !== "my" ||
         members.some((m) => m.club_id === c.id && m.user_id === user?.id)) &&
       (c.name + " " + c.book + " " + c.author)
@@ -434,6 +532,20 @@ function App() {
                   }
                 </i>
               )}
+            </button>
+            <button
+              className={view === "friends" ? "selected" : ""}
+              onClick={() => home("friends")}
+            >
+              <Users size={18} />
+              Друзья {incomingCount > 0 && <i>{incomingCount}</i>}
+            </button>
+            <button
+              className={view === "account" ? "selected" : ""}
+              onClick={() => home("account")}
+            >
+              <UserCircle size={18} />
+              Профиль
             </button>
             <button
               className={view === "about" ? "selected" : ""}
@@ -494,10 +606,10 @@ function App() {
         <header>
           <button
             className="icon mobile-menu"
-            onClick={() => setMobile(!mobile)}
-            aria-label="Открыть меню"
+            onClick={() => (user ? home("account") : auth())}
+            aria-label="Открыть профиль"
           >
-            <Menu />
+            <UserCircle />
           </button>
           <div className="breadcrumbs">
             Книжное сообщество <span>/</span>{" "}
@@ -506,9 +618,13 @@ function App() {
                 ? club.name
                 : view === "my"
                   ? "Мои клубы"
-                  : view === "about"
-                    ? "Наш подход"
-                    : "Открыть клубы"}
+                  : view === "friends"
+                    ? "Друзья"
+                    : view === "account"
+                      ? "Профиль"
+                      : view === "about"
+                        ? "Наш подход"
+                        : "Открыть клубы"}
             </b>
           </div>
           <span className="header-motto">
@@ -535,7 +651,23 @@ function App() {
               </button>
             </div>
           )}
-          {!club && view !== "about" && (
+          {!club && ["friends", "account"].includes(view) && (
+            <Community
+              community={community}
+              clubs={clubs}
+              name={name}
+              onAuth={auth}
+              onRespond={respondInvite}
+              account={view === "account"}
+              onSignOut={() =>
+                run(async () => {
+                  await db.auth.signOut();
+                  home("discover");
+                })
+              }
+            />
+          )}
+          {!club && ["discover", "my"].includes(view) && (
             <>
               <section className="intro">
                 <div>
@@ -584,7 +716,7 @@ function App() {
                   </h2>
                   <p>
                     {view === "my"
-                      ? "Продолжите с той страницы, на которой остановились."
+                      ? "Продолжите с того места, на котором остановились."
                       : "Присоединяйтесь к открытому клубу или соберите свой."}
                   </p>
                 </div>
@@ -611,7 +743,17 @@ function App() {
                           small
                           tone={i % 3}
                         />
-                        <span className="badge">Открытый клуб</span>
+                        <span className="badge">
+                          {c.visibility === "closed" ? (
+                            <>
+                              <LockKeyhole size={10} /> Закрытый клуб
+                            </>
+                          ) : (
+                            <>
+                              <Globe2 size={10} /> Открытый клуб
+                            </>
+                          )}
+                        </span>
                       </div>
                       <div className="card-info">
                         <span className="eyebrow">{c.name}</span>
@@ -756,12 +898,12 @@ function App() {
                   [
                     "01",
                     "Небольшой круг",
-                    "Соберите людей, с которыми хочется думать вслух. Все клубы открытые: название, книга и выбранные имена участников видны всем.",
+                    "Соберите людей, с которыми хочется думать вслух. Открытый клуб доступен всем, а закрытый — только вашему кругу по приглашению.",
                   ],
                   [
                     "02",
                     "Общий ритм",
-                    "Организатор выбирает книгу, число страниц и недель. Мы делим чтение на небольшие этапы. Вы отмечаете свою страницу без соревнования.",
+                    "Организатор выбирает книгу, главы или страницы и число недель. Мы делим чтение на небольшие этапы. Вы отмечаете свой прогресс без соревнования.",
                   ],
                   [
                     "03",
@@ -803,7 +945,9 @@ function App() {
                   <p className="eyebrow">
                     {isDemo
                       ? "ПРИМЕР КЛУБА · ЗНАКОМСТВО С BOOKMATTERS"
-                      : "ОТКРЫТЫЙ КНИЖНЫЙ КЛУБ"}{" "}
+                      : club.visibility === "closed"
+                        ? "ЗАКРЫТЫЙ КНИЖНЫЙ КЛУБ"
+                        : "ОТКРЫТЫЙ КНИЖНЫЙ КЛУБ"}{" "}
                     / {club.name}
                   </p>
                   <h1>{club.book}</h1>
@@ -816,14 +960,16 @@ function App() {
                     </span>
                     <span>
                       <BookOpen size={17} />
-                      {club.pages} страниц
+                      {totalUnits(club)} {unitShort(club)}
                     </span>
                     <span>
                       <Users size={17} />
                       {isDemo
                         ? "Ваш будущий круг"
-                        : members.filter((m) => m.club_id === club.id).length +
-                          " читателей"}
+                        : club.visibility === "closed" && !mine
+                          ? "По приглашению"
+                          : members.filter((m) => m.club_id === club.id)
+                              .length + " читателей"}
                     </span>
                   </div>
                   <div className="actions">
@@ -843,7 +989,7 @@ function App() {
                         Вы в клубе
                       </span>
                     )}
-                    {!isDemo && (
+                    {!isDemo && club.visibility !== "closed" && (
                       <button
                         className="secondary"
                         onClick={() =>
@@ -856,7 +1002,31 @@ function App() {
                         }
                       >
                         <Link size={16} />
-                        Пригласить
+                        Скопировать ссылку
+                      </button>
+                    )}
+                    {canInvite && (
+                      <button
+                        className="primary"
+                        onClick={() => {
+                          community.setError("");
+                          setModal("invite");
+                        }}
+                      >
+                        <Users size={17} />
+                        Пригласить друзей
+                      </button>
+                    )}
+                    {isOwner && (
+                      <button
+                        className="glass-icon"
+                        aria-label="Настройки клуба"
+                        onClick={() => {
+                          setSettingsVisibility(club.visibility || "open");
+                          setModal("settings");
+                        }}
+                      >
+                        <Settings2 size={19} />
                       </button>
                     )}
                   </div>
@@ -899,8 +1069,8 @@ function App() {
                           <div>
                             <b>{s.title}</b>
                             <p>
-                              Страницы {s.page_from}–{s.page_to} ·{" "}
-                              {date(s.opens_at)} — {date(s.meets_at)}
+                              {stageRange(s, club)} · {date(s.opens_at)} —{" "}
+                              {date(s.meets_at)}
                             </p>
                           </div>
                           {new Date(s.opens_at) > new Date() ? (
@@ -915,7 +1085,9 @@ function App() {
                     <div className="panel">
                       <h2>Круг читателей</h2>
                       <p>
-                        Выбранные имена участников открытого клуба видны всем.
+                        {club.visibility === "closed"
+                          ? "Участников видят только члены закрытого клуба."
+                          : "Выбранные имена участников открытого клуба видны всем."}
                       </p>
                       {isDemo ? (
                         <p>В вашем клубе здесь появятся участники.</p>
@@ -950,6 +1122,7 @@ function App() {
                               if (r.error) throw r.error;
                               await refresh();
                               setPosts([]);
+                              home("my");
                               toast("Вы вышли из клуба");
                             })
                           }
@@ -966,17 +1139,19 @@ function App() {
                       {mine ? (
                         <form onSubmit={saveProgress}>
                           <label>
-                            Я на странице
+                            {chapterMode(club)
+                              ? "Прочитано глав"
+                              : "Я на странице"}
                             <input
                               type="number"
                               min="0"
-                              max={club.pages}
+                              max={totalUnits(club)}
                               required
-                              value={progress.page}
+                              value={progress[progressKey] || 0}
                               onChange={(e) =>
                                 setProgress({
                                   ...progress,
-                                  page: e.target.value,
+                                  [progressKey]: e.target.value,
                                 })
                               }
                             />
@@ -1018,9 +1193,7 @@ function App() {
                               : "ПЛАН ЧТЕНИЯ"}
                           </p>
                           <h2>{active?.title || "Загружаем этапы…"}</h2>
-                          <p>
-                            Страницы {active?.page_from}–{active?.page_to}
-                          </p>
+                          <p>{stageRange(active, club)}</p>
                         </div>
                         <select
                           aria-label="Выбрать этап"
@@ -1040,7 +1213,7 @@ function App() {
                           <h3>Всему своё время</h3>
                           <p>
                             Обсуждение откроется {date(active.opens_at)}. Пока
-                            остаёмся на текущих страницах.
+                            остаёмся на текущем этапе.
                           </p>
                         </div>
                       ) : isDemo ? (
@@ -1082,7 +1255,7 @@ function App() {
                           <div className="prompt-card">
                             <span>ВОПРОС ДЛЯ РАЗГОВОРА</span>
                             <p>
-                              Какая мысль на этих страницах заставила вас
+                              Какая мысль в этом отрывке заставила вас
                               остановиться?
                             </p>
                           </div>
@@ -1182,7 +1355,11 @@ function App() {
                 <aside className="reading-aside">
                   <div className="panel progress-panel">
                     <p className="eyebrow">ВАШ РИТМ</p>
-                    <h3>По одной странице.</h3>
+                    <h3>
+                      {chapterMode(club)
+                        ? "Глава за главой."
+                        : "По одной странице."}
+                    </h3>
                     <p>
                       У каждого свой темп.
                       <br />
@@ -1194,15 +1371,19 @@ function App() {
                           width:
                             Math.min(
                               100,
-                              (Number(progress.page) / club.pages) * 100,
+                              (Number(progress[progressKey] || 0) /
+                                totalUnits(club)) *
+                                100,
                             ) + "%",
                         }}
                       />
                     </div>
                     <div className="progress-caption">
                       <b>
-                        {mine ? progress.page : 0}{" "}
-                        <small>/ {club.pages} стр.</small>
+                        {mine ? progress[progressKey] || 0 : 0}{" "}
+                        <small>
+                          / {totalUnits(club)} {unitShort(club)}
+                        </small>
                       </b>
                       <Bookmark size={17} />
                     </div>
@@ -1305,6 +1486,29 @@ function App() {
           </footer>
         </main>
       </div>
+      <nav className="mobile-tabbar" aria-label="Основная навигация">
+        {[
+          ["discover", "Обзор", Search],
+          ["my", "Мои клубы", BookOpen],
+          ["friends", "Друзья", Users],
+          ["account", "Профиль", UserCircle],
+        ].map(([v, title, Icon]) => (
+          <button
+            key={v}
+            className={
+              view === v || (view === "club" && v === "my") ? "active" : ""
+            }
+            aria-current={view === v ? "page" : undefined}
+            onClick={() => home(v)}
+          >
+            <span>
+              <Icon size={23} />
+              {v === "friends" && incomingCount > 0 && <i>{incomingCount}</i>}
+            </span>
+            <small>{title}</small>
+          </button>
+        ))}
+      </nav>
       {notice && (
         <div role="status" className="toast">
           <Check size={18} />
@@ -1340,7 +1544,11 @@ function App() {
                   : signup
                     ? "Добро пожаловать."
                     : "С возвращением."
-                : "Начнём с одной книги."}
+                : modal === "invite"
+                  ? "Позовите своих."
+                  : modal === "settings"
+                    ? "Кому открыт ваш клуб?"
+                    : "Начнём с одной книги."}
             </h2>
             {error && (
               <div className="error" role="alert">
@@ -1442,11 +1650,44 @@ function App() {
                   не показывается.
                 </small>
               </>
+            ) : modal === "invite" ? (
+              <InviteFriends
+                community={community}
+                club={club}
+                members={members}
+                onFriends={() => {
+                  setModal(null);
+                  home("friends");
+                }}
+              />
+            ) : modal === "settings" ? (
+              <form onSubmit={saveClubSettings}>
+                <label>
+                  Тип клуба
+                  <select
+                    value={settingsVisibility}
+                    onChange={(e) => setSettingsVisibility(e.target.value)}
+                  >
+                    <option value="open">Открытый — для всех читателей</option>
+                    <option value="closed">
+                      Закрытый — только по приглашению
+                    </option>
+                  </select>
+                </label>
+                <p className="fine">
+                  Закрытый клуб исчезнет из общего каталога. Состав и обсуждения
+                  будут доступны участникам, а приглашения отправляет
+                  организатор. Все текущие участники сохранят доступ.
+                </p>
+                <button className="primary full" disabled={busy}>
+                  Сохранить настройки
+                </button>
+              </form>
             ) : (
               <>
                 <p>
-                  Небольшие этапы, общие вопросы и встречи. Создайте открытый
-                  клуб и пригласите своих.
+                  Выберите свой круг и комфортный ритм чтения. Мы подготовим
+                  план встреч.
                 </p>
                 <form onSubmit={create}>
                   <label>
@@ -1489,16 +1730,84 @@ function App() {
                       placeholder="Что хочется обсудить? Кого вы ждёте?"
                     />
                   </label>
+                  <fieldset className="choice-field">
+                    <legend>Кто может вступить?</legend>
+                    <div className="choice-grid">
+                      {[
+                        [
+                          "open",
+                          "Открытый",
+                          "Виден в каталоге. Вступить может любой читатель.",
+                          Globe2,
+                        ],
+                        [
+                          "closed",
+                          "Закрытый",
+                          "Личный круг. Только приглашённые организатором друзья.",
+                          LockKeyhole,
+                        ],
+                      ].map(([value, title, hint, Icon]) => (
+                        <label
+                          key={value}
+                          className={
+                            visibility === value
+                              ? "choice-card chosen"
+                              : "choice-card"
+                          }
+                        >
+                          <input
+                            type="radio"
+                            name="visibility"
+                            value={value}
+                            checked={visibility === value}
+                            onChange={() => setVisibility(value)}
+                          />
+                          <Icon size={21} />
+                          <b>{title}</b>
+                          <span>{hint}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <fieldset className="choice-field">
+                    <legend>Как будем читать?</legend>
+                    <div className="segmented">
+                      {[
+                        ["chapters", "По главам"],
+                        ["pages", "По страницам"],
+                      ].map(([value, title]) => (
+                        <label
+                          key={value}
+                          className={readingMode === value ? "active" : ""}
+                        >
+                          <input
+                            type="radio"
+                            name="mode"
+                            value={value}
+                            checked={readingMode === value}
+                            onChange={() => {
+                              setReadingMode(value);
+                              setUnitCount(value === "chapters" ? 12 : 224);
+                            }}
+                          />
+                          {title}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                   <div className="form-row three">
                     <label>
-                      Страниц
+                      {readingMode === "chapters"
+                        ? "Всего глав"
+                        : "Всего страниц"}
                       <input
                         type="number"
-                        name="pages"
+                        name="units"
                         required
                         min="1"
                         max="10000"
-                        defaultValue={224}
+                        value={unitCount}
+                        onChange={(e) => setUnitCount(e.target.value)}
                       />
                     </label>
                     <label>
@@ -1542,9 +1851,14 @@ function App() {
                     />
                   </label>
                   <p className="fine">
-                    Все клубы открытые. План создаётся автоматически: один этап
-                    в неделю, страницы делятся поровну. Обсуждения доступны
-                    только участникам. Заметки — только автору.
+                    {visibility === "closed"
+                      ? "Закрытый клуб виден только участникам и приглашённым друзьям."
+                      : "Открытый клуб виден в общем каталоге."}{" "}
+                    План создаётся автоматически: один этап в неделю,{" "}
+                    {readingMode === "chapters" ? "главы" : "страницы"} делятся
+                    поровну. Недель не может быть больше, чем{" "}
+                    {readingMode === "chapters" ? "глав" : "страниц"}. Личные
+                    заметки видны только вам.
                   </p>
                   <button className="primary full" disabled={busy}>
                     {busy ? "Создаём…" : "Создать клуб"}
@@ -1562,9 +1876,15 @@ function App() {
 createRoot(document.getElementById("root")).render(<App />);
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/sw.js", { scope: "/", updateViaCache: "none" })
-      .catch((error) => console.warn("Service worker registration failed", error));
-  }, { once: true });
+  window.addEventListener(
+    "load",
+    () => {
+      navigator.serviceWorker
+        .register("/sw.js", { scope: "/", updateViaCache: "none" })
+        .catch((error) =>
+          console.warn("Service worker registration failed", error),
+        );
+    },
+    { once: true },
+  );
 }
